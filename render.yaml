@@ -1,0 +1,24 @@
+# Render Blueprint for SCOUT — single all-in-one backend service.
+# Deploys backend/ as one Docker web service that runs RabbitMQ (in-container),
+# Alembic migrations, Celery worker + embedded beat, and the FastAPI API.
+# Frontend deploys separately on Vercel.
+services:
+  - type: web
+    name: scout-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: SCOUT_DATABASE_URL        # Supabase Postgres URI (postgresql+psycopg://...)
+        sync: false
+      - key: SCOUT_SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SCOUT_SUPABASE_JWKS_URL
+        sync: false
+      - key: SCOUT_GEMINI_API_KEY
+        sync: false
+      - key: SCOUT_CORS_ALLOW_ORIGINS  # your Vercel URL, e.g. https://scout.vercel.app
+        sync: false
