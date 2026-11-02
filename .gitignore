@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Environment and secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Model caches (local embedding/reranker weights)
+.models/
+.hf_cache/
+
+# Local infrastructure state
+.data/
+pgdata/
