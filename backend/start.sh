@@ -19,7 +19,9 @@ rabbitmqctl set_permissions -p scout scout ".*" ".*" ".*"
 alembic upgrade head
 
 # --- 3) Celery worker + embedded beat --------------------------------------
-celery -A workers.celery_app:app worker -B --loglevel=INFO --concurrency=1 &
+# max-tasks-per-child recycles the worker periodically to cap memory growth
+# on small (free-tier) instances.
+celery -A workers.celery_app:app worker -B --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 &
 
 # --- 4) API (foreground) ---------------------------------------------------
 exec uvicorn app.main:app --host 0.0.0.0 --port 8000
