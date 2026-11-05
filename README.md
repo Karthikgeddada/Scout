@@ -111,17 +111,21 @@ plan validation/rejection, and executor edge cases — all runnable without exte
 
 ## Cloud deployment (Render + Vercel, 100% free tier)
 
-The backend deploys as **one** Render web service (API + Celery worker + embedded beat +
-in-container RabbitMQ in a single container); the frontend deploys to **Vercel**.
+The backend deploys as **one** Render web service (PostgreSQL + pgvector, RabbitMQ,
+Celery worker with embedded beat, and the FastAPI API — all in a single container, no
+external database); the frontend deploys to **Vercel**.
 
-### 1) Supabase (free)
+### 1) Supabase (free) — auth + storage only, NO database needed
 
-* Create a project, enable the **pgvector** extension (Database → Extensions).
-* Copy the **connection pooler** URI (Session mode, port 5432 works with psycopg) from
-  Database → Connection string. It becomes `SCOUT_DATABASE_URL` (replace the scheme with
-  `postgresql+psycopg://`).
-* Copy the **service role key** (Settings → API) and note your JWKS URL:
-  `https://<PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json`.
+The database is **built in**: on Render, `start.sh` boots a PostgreSQL 15 + pgvector
+instance inside the same container and migrates it automatically. You do NOT need
+Supabase's database at all.
+
+From a free Supabase project you still need (for auth + file storage):
+
+* The **service role key** (Settings → API).
+* Your JWKS URL: `https://<PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json`.
+* A private **storage bucket** named `documents` (Storage → New bucket, keep it private).
 
 ### 2) Backend → Render (free plan)
 
@@ -129,15 +133,16 @@ in-container RabbitMQ in a single container); the frontend deploys to **Vercel**
    (it reads `render.yaml`), or create a Web Service manually:
    * **Runtime:** Docker · **Root directory:** `backend` · **Health check path:** `/health` · **Plan:** Free
 2. Set the environment variables (the blueprint prompts for them):
-   * `SCOUT_DATABASE_URL` — the Supabase pooler URI from step 1
    * `SCOUT_SUPABASE_SERVICE_ROLE_KEY`
    * `SCOUT_SUPABASE_JWKS_URL`
    * `SCOUT_GEMINI_API_KEY` — free key from Google AI Studio
    * `SCOUT_CORS_ALLOW_ORIGINS` — your Vercel URL (comma-separated if several)
-3. Deploy. `backend/start.sh` boots RabbitMQ (in-container), runs `alembic upgrade head`,
-   starts the Celery worker (embedded beat, memory-capped for the 512 MB free tier), then
-   uvicorn on Render's `PORT`. The first deploy is slow (pip installs + apt packages);
-   the health check has a 120 s start period.
+   * (`SCOUT_DATABASE_URL` is optional — leave unset to use the built-in Postgres)
+3. Deploy. `backend/start.sh` boots PostgreSQL (in-container), then RabbitMQ
+   (in-container), runs `alembic upgrade head`, starts the Celery worker (embedded
+   beat, memory-capped for the 512 MB free tier), then uvicorn on Render's `PORT`.
+   The first deploy is slow (pip installs + apt packages); the health check has a
+   120 s start period.
 
 ### 3) Frontend → Vercel (Hobby plan)
 
@@ -150,11 +155,15 @@ in-container RabbitMQ in a single container); the frontend deploys to **Vercel**
 
 ### Free-tier notes
 
-* Render free services sleep after ~15 min idle; the first request after sleep takes
-  ~30–60 s to wake. RabbitMQ state is in-memory only — after a sleep/restart the broker
-  and queues are re-provisioned by `start.sh` (messages in flight are not durable across
-  restarts; documents can be reprocessed from the UI).
-* The worker runs with `--concurrency=1 --max-tasks-per-child=8` to stay inside 512 MB.
+* ⚠️ **Built-in database persistence**: Render free services sleep after ~15 min idle and
+  have an **ephemeral disk**. The in-container PostgreSQL (like the in-container RabbitMQ)
+  is wiped on every sleep/wake, redeploy, or restart — uploaded documents and their index
+  are **lost** and must be re-uploaded. For durable data, either set `SCOUT_DATABASE_URL`
+  to an external Postgres (e.g. Supabase, free) or upgrade to a paid plan with a disk.
+* The first request after sleep takes ~30–60 s to wake. Queues are re-provisioned by
+  `start.sh`; documents can be reprocessed from the UI.
+* The stack (Postgres + RabbitMQ + worker + API + ML models) is deliberately tuned for
+  512 MB: worker `--concurrency=1 --max-tasks-per-child=8`.
 * Embedding/reranker models download to a container-local HF cache on first use.
 
 ## Documentation

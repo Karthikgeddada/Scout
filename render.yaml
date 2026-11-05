@@ -1,6 +1,7 @@
 # Render Blueprint for SCOUT — single all-in-one backend service.
-# Deploys backend/ as one Docker web service that runs RabbitMQ (in-container),
-# Alembic migrations, Celery worker + embedded beat, and the FastAPI API.
+# Deploys backend/ as one Docker web service that runs PostgreSQL (+pgvector),
+# RabbitMQ (both in-container), Alembic migrations, Celery worker + embedded
+# beat, and the FastAPI API. No external database required.
 # Frontend deploys separately on Vercel.
 services:
   - type: web
@@ -12,11 +13,12 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Render Docker services listen on PORT; keep uvicorn and Render in sync.
+      # Pin PORT so uvicorn, the Docker HEALTHCHECK (localhost:8000) and
+      # Render all agree on one port.
       - key: PORT
         value: "8000"
-      - key: SCOUT_DATABASE_URL        # Supabase Postgres URI (postgresql+psycopg://...)
-        sync: false
+      # No SCOUT_DATABASE_URL needed — the in-container Postgres is used by
+      # default. Set it only if you point at an external Postgres instead.
       - key: SCOUT_SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SCOUT_SUPABASE_JWKS_URL

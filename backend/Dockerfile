@@ -9,7 +9,8 @@ ENV PYTHONUNBUFFERED=1 \
     HF_HOME=/opt/hf_cache
 
 # System libraries required by PyMuPDF, OpenCV/PaddleOCR, Camelot (ghostscript),
-# plus rabbitmq-server for the in-container broker (runs as root in start.sh).
+# plus rabbitmq-server and PostgreSQL (+ pgvector) so the whole stack — broker,
+# database, worker, API — runs self-contained in ONE container (no external DB).
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential \
         curl \
@@ -19,6 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libmagic1 \
         ghostscript \
         rabbitmq-server \
+        postgresql-15 \
+        postgresql-15-pgvector \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
