@@ -23,5 +23,6 @@ alembic upgrade head
 # on small (free-tier) instances.
 celery -A workers.celery_app:app worker -B --loglevel=INFO --concurrency=1 --max-tasks-per-child=8 &
 
-# --- 4) API (foreground) ---------------------------------------------------
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+# --- 4) API (foreground) ----------------------------------------------------
+# Render injects PORT (default 10000); local/compose use 8000.
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"

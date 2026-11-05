@@ -7,13 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import router
 from app.core.config import get_settings
-from app.core.errors import install_error_handlers
-from app.core.observability import configure_logging, request_id_middleware
+from app.core.observability import RequestContextMiddleware, configure_logging
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    configure_logging(settings.log_level)
+    configure_logging(settings.environment)
 
     app = FastAPI(
         title="SCOUT API",
@@ -21,6 +20,10 @@ def create_app() -> FastAPI:
         description="AI-powered document intelligence platform",
         docs_url="/docs" if settings.api_docs_enabled else None,
     )
+
+    # RequestContextMiddleware is added FIRST so CORS ends up outermost —
+    # error responses it renders then still carry CORS headers.
+    app.add_middleware(RequestContextMiddleware)
 
     if settings.cors_allow_origins:
         app.add_middleware(
@@ -31,8 +34,6 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    app.middleware("http")(request_id_middleware)
-    install_error_handlers(app)
     app.include_router(router)
 
     @app.get("/health", tags=["system"])

@@ -17,7 +17,10 @@ class Settings(BaseSettings):
     # Runtime
     environment: str = "development"  # development | staging | production
     api_prefix: str = "/v1"
-    cors_origins: list[str] = ["http://localhost:5173"]
+    # Comma-separated origins (Render sets SCOUT_CORS_ALLOW_ORIGINS to the Vercel URL)
+    cors_allow_origins: str = "http://localhost:5173"
+    # Enable /docs Swagger UI (disable in sensitive prod environments if desired)
+    api_docs_enabled: bool = True
 
     # Supabase (service-role key is backend-only and must never reach a client)
     supabase_url: str = ""

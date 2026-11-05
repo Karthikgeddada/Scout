@@ -52,13 +52,20 @@ class RequestContextMiddleware:
         token = request_id_var.set(rid)
         log = get_logger("request")
         start = time.perf_counter()
+        status_holder = {"status": "-"}
+
+        async def send_wrapper(message) -> None:
+            if message["type"] == "http.response.start":
+                status_holder["status"] = message["status"]
+            await send(message)
+
         try:
-            await self.app(scope, receive, send)
+            await self.app(scope, receive, send_wrapper)
         except ScoutError as exc:
             response = JSONResponse(
                 status_code=exc.status, content=error_payload(exc, request_id=rid)
             )
-            await response(scope, receive, send)
+            await response(scope, receive, send_wrapper)
         except Exception as exc:  # noqa: BLE001 - render unexpected errors consistently
             log.exception("unhandled_error", path=request.url.path, error=str(exc))
             response = JSONResponse(
@@ -72,16 +79,14 @@ class RequestContextMiddleware:
                     }
                 },
             )
-            await response(scope, receive, send)
+            await response(scope, receive, send_wrapper)
         finally:
-            if scope.get("_response_status") is not None:
-                pass
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             log.info(
                 "request_completed",
                 method=request.method,
                 path=request.url.path,
-                status=scope.get("_response_status", "-"),
+                status=status_holder["status"],
                 duration_ms=duration_ms,
                 request_id=rid,
             )

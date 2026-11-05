@@ -109,6 +109,54 @@ The suite covers detection heuristics, canonical round-trips, financial cell par
 invariants, fusion ordering, citation validation, context expansion, prompt-guard behavior,
 plan validation/rejection, and executor edge cases — all runnable without external services.
 
+## Cloud deployment (Render + Vercel, 100% free tier)
+
+The backend deploys as **one** Render web service (API + Celery worker + embedded beat +
+in-container RabbitMQ in a single container); the frontend deploys to **Vercel**.
+
+### 1) Supabase (free)
+
+* Create a project, enable the **pgvector** extension (Database → Extensions).
+* Copy the **connection pooler** URI (Session mode, port 5432 works with psycopg) from
+  Database → Connection string. It becomes `SCOUT_DATABASE_URL` (replace the scheme with
+  `postgresql+psycopg://`).
+* Copy the **service role key** (Settings → API) and note your JWKS URL:
+  `https://<PROJECT_REF>.supabase.co/auth/v1/.well-known/jwks.json`.
+
+### 2) Backend → Render (free plan)
+
+1. Push this repo to GitHub, then in Render: **New → Blueprint** and select the repo
+   (it reads `render.yaml`), or create a Web Service manually:
+   * **Runtime:** Docker · **Root directory:** `backend` · **Health check path:** `/health` · **Plan:** Free
+2. Set the environment variables (the blueprint prompts for them):
+   * `SCOUT_DATABASE_URL` — the Supabase pooler URI from step 1
+   * `SCOUT_SUPABASE_SERVICE_ROLE_KEY`
+   * `SCOUT_SUPABASE_JWKS_URL`
+   * `SCOUT_GEMINI_API_KEY` — free key from Google AI Studio
+   * `SCOUT_CORS_ALLOW_ORIGINS` — your Vercel URL (comma-separated if several)
+3. Deploy. `backend/start.sh` boots RabbitMQ (in-container), runs `alembic upgrade head`,
+   starts the Celery worker (embedded beat, memory-capped for the 512 MB free tier), then
+   uvicorn on Render's `PORT`. The first deploy is slow (pip installs + apt packages);
+   the health check has a 120 s start period.
+
+### 3) Frontend → Vercel (Hobby plan)
+
+1. **Add New → Project** → import the same GitHub repo.
+2. **Root Directory:** `frontend` (framework auto-detected: Vite; build command
+   `tsc -b && vite build`).
+3. Environment variable: `VITE_API_URL` = your Render origin, e.g.
+   `https://scout-api.onrender.com` — bare origin, **no path, no trailing slash**.
+4. Deploy. `vercel.json` handles the SPA rewrite for client-side routes.
+
+### Free-tier notes
+
+* Render free services sleep after ~15 min idle; the first request after sleep takes
+  ~30–60 s to wake. RabbitMQ state is in-memory only — after a sleep/restart the broker
+  and queues are re-provisioned by `start.sh` (messages in flight are not durable across
+  restarts; documents can be reprocessed from the UI).
+* The worker runs with `--concurrency=1 --max-tasks-per-child=8` to stay inside 512 MB.
+* Embedding/reranker models download to a container-local HF cache on first use.
+
 ## Documentation
 
 * [docs/architecture.md](docs/architecture.md) — system design and data flow

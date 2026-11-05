@@ -12,6 +12,9 @@ services:
     healthCheckPath: /health
     autoDeploy: true
     envVars:
+      # Render Docker services listen on PORT; keep uvicorn and Render in sync.
+      - key: PORT
+        value: "8000"
       - key: SCOUT_DATABASE_URL        # Supabase Postgres URI (postgresql+psycopg://...)
         sync: false
       - key: SCOUT_SUPABASE_SERVICE_ROLE_KEY
