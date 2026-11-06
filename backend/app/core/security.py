@@ -51,12 +51,22 @@ class JWKSVerifier:
         jwk = keys.get(header.get("kid"))
         if jwk is None:
             raise AuthenticationError("Unknown signing key")
-        public_key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
+        # Supabase projects may sign with RS256 (RSA) or ES256 (EC P-256);
+        # pick the algorithm family from the key's kty (falling back to
+        # the token header's alg).
+        kty = (jwk.get("kty") or "").upper()
+        if kty == "EC" or header.get("alg") == "ES256":
+            algorithm = jwt.algorithms.ECAlgorithm
+            algorithms = ["ES256"]
+        else:
+            algorithm = jwt.algorithms.RSAAlgorithm
+            algorithms = ["RS256"]
+        public_key = algorithm.from_jwk(jwk)
         try:
             return jwt.decode(
                 token,
                 public_key,
-                algorithms=["RS256"],
+                algorithms=algorithms,
                 audience=self._audience,
                 options={"require": ["exp", "sub"]},
             )

@@ -22,7 +22,9 @@ def verifier(settings: Settings | None = None) -> JWKSVerifier:
     global _verifier
     if _verifier is None:
         s = settings or get_settings()
-        _verifier = JWKSVerifier(s.supabase_jwks_url, s.supabase_jwt_audience)
+        # Derive the JWKS URL from the project URL unless explicitly set.
+        jwks = s.supabase_jwks_url or f"{s.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
+        _verifier = JWKSVerifier(jwks, s.supabase_jwt_audience)
     return _verifier
 
 
