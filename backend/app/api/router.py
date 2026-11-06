@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import uuid as uuid_mod
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from app.db.models_core import Workspace, WorkspaceMember
 from app.db.models_documents import Document
 from app.db.models_jobs import ProcessingJob
 from app.db.session import get_session
+from app.ingestion.tasks import run_ingestion
 from app.schemas_chat import (
     ChatStreamRequest,
     ConversationCreate,
@@ -148,6 +149,7 @@ def create_upload_url(
 @router.post("/documents/complete-upload", response_model=DocumentOut)
 def complete_upload(
     payload: CompleteUploadRequest,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -155,9 +157,12 @@ def complete_upload(
     if doc is None:
         raise NotFoundError("document not found")
     require_workspace(str(doc.workspace_id), user, session)
-    result = documents_svc.complete_upload(session, payload.document_id, user.profile.id)
+    doc, job_id = documents_svc.complete_upload(session, payload.document_id, user.profile.id)
     session.commit()
-    return result
+    # In-process ingestion (no broker): runs on this same Render service after
+    # the response is sent; the task opens its own DB session.
+    background_tasks.add_task(run_ingestion, job_id, str(doc.id), str(doc.workspace_id), doc.version)
+    return doc
 
 
 @router.get("/documents", response_model=Page[DocumentOut])
@@ -235,6 +240,7 @@ def delete_document(
 @router.post("/documents/{document_id}/reprocess", response_model=DocumentOut)
 def reprocess_document(
     document_id: uuid_mod.UUID,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(get_current_user),
     session: Session = Depends(get_session),
 ):
@@ -242,9 +248,10 @@ def reprocess_document(
     if doc is None:
         raise NotFoundError("document not found")
     require_workspace(str(doc.workspace_id), user, session)
-    result = documents_svc.reprocess(session, document_id)
+    doc, job_id = documents_svc.reprocess(session, document_id)
     session.commit()
-    return result
+    background_tasks.add_task(run_ingestion, job_id, str(doc.id), str(doc.workspace_id), doc.version)
+    return doc
 
 
 # ---------- conversations ----------
@@ -462,16 +469,17 @@ def usage(
 ):
     require_workspace(str(workspace_id), user, session)
     from app.db.models_core import UsageRecord
-    from sqlalchemy import func
 
-    month = func.to_char(func.date_trunc("month", UsageRecord.created_at), "YYYY-MM")
-    result = session.execute(
-        select(UsageRecord.kind, month.label("month"),
-               func.sum(UsageRecord.units).label("units"))
+    # Portable grouping (SQLite has no date_trunc): aggregate in Python.
+    rows = session.execute(
+        select(UsageRecord.kind, UsageRecord.created_at, UsageRecord.units)
         .where(UsageRecord.workspace_id == workspace_id)
-        .group_by(UsageRecord.kind, "month")
-    ).fetchall()
-    return [UsageOut(kind=r[0], month=r[1], units=int(r[2] or 0)) for r in result]
+    ).all()
+    grouped: dict[tuple[str, str], int] = {}
+    for kind, created_at, units in rows:
+        month = created_at.strftime("%Y-%m")
+        grouped[(kind, month)] = grouped.get((kind, month), 0) + int(units or 0)
+    return [UsageOut(kind=k, month=m, units=u) for (k, m), u in grouped.items()]
 
 
 # ---------- home / recents ----------

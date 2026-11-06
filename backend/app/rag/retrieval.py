@@ -1,111 +1,177 @@
-"""Hybrid retrieval: PostgreSQL FTS (lexical) + pgvector (dense) + RRF + rerank.
+"""Hybrid retrieval: lexical scoring + dense cosine + RRF + optional rerank.
 
-Every search is workspace-scoped and document-filtered; unscoped vector search is
-impossible by construction. Runs and candidates are persisted for evaluation.
+SQLite-friendly: chunk text is scored in Python over a LIKE-prefiltered
+candidate set; embeddings are JSON columns compared with numpy cosine. Every
+search is workspace-scoped and document-filtered by construction. Runs and
+candidates are persisted for evaluation.
 """
 
 from __future__ import annotations
 
-from sqlalchemy import text
+import math
+import re
+import uuid as uuid_mod
+
+import numpy as np
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.ai.embeddings import EmbeddingService
 from app.ai.reranker import RerankerService
 from app.core.config import get_settings
 from app.core.observability import get_logger
+from app.db.models_documents import Document
+from app.db.models_retrieval import (
+    DocumentChunk,
+    DocumentEmbedding,
+    RetrievalCandidate,
+    RetrievalRun,
+)
 from app.rag.context import ScoredChunk
 from app.rag.fusion import reciprocal_rank_fusion
 
 log = get_logger("retrieval")
 
-_LEXICAL_SQL = """
-SELECT c.id, c.chunk_id, c.document_id, c.text, c.kind, c.pages, c.sheet,
-       c.locator, c.section_title, c.parent_section_id, c.token_count,
-       ts_rank(c.tsv, plainto_tsquery('english', :q)) AS rank
-FROM document_chunks c
-WHERE c.workspace_id = :ws AND c.tsv @@ plainto_tsquery('english', :q)
-  AND (:docs IS NULL OR c.document_id = ANY(CAST(:docs AS uuid[])))
-ORDER BY rank DESC
-LIMIT :limit
-"""
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
-# Exact-phrase variant: match the raw phrase inside chunk text.
-_EXACT_SQL = """
-SELECT c.id, c.chunk_id, c.document_id, c.text, c.kind, c.pages, c.sheet,
-       c.locator, c.section_title, c.parent_section_id, c.token_count, 1.0 AS rank
-FROM document_chunks c
-WHERE c.workspace_id = :ws AND c.text ILIKE :phrase
-  AND (:docs IS NULL OR c.document_id = ANY(CAST(:docs AS uuid[])))
-LIMIT :limit
-"""
 
-_DENSE_SQL = """
-SELECT c.id, c.chunk_id, c.document_id, c.text, c.kind, c.pages, c.sheet,
-       c.locator, c.section_title, c.parent_section_id, c.token_count,
-       1 - (e.embedding <=> CAST(:qv AS vector)) AS rank
-FROM document_embeddings e
-JOIN document_chunks c ON c.id = e.chunk_db_id
-WHERE e.workspace_id = :ws
-  AND (:docs IS NULL OR c.document_id = ANY(CAST(:docs AS uuid[])))
-ORDER BY e.embedding <=> CAST(:qv AS vector)
-LIMIT :limit
-"""
+def _terms(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _uuid(value) -> uuid_mod.UUID:
+    return value if isinstance(value, uuid_mod.UUID) else uuid_mod.UUID(str(value))
 
 
 class HybridRetriever:
     def __init__(self, embedder: EmbeddingService | None = None, reranker: RerankerService | None = None) -> None:
         self.settings = get_settings()
         self.embedder = embedder
+        self._embedder_ready = embedder is not None
         self.reranker = reranker or RerankerService()
 
-    def _rows(self, session: Session, sql: str, params: dict) -> list[dict]:
-        result = session.execute(text(sql), params)
-        cols = result.keys()
-        return [dict(zip(cols, row)) for row in result.fetchall()]
+    def _get_embedder(self):
+        """Lazily construct the (Gemini-backed) embedder; None disables dense."""
+        if not self._embedder_ready:
+            try:
+                self.embedder = EmbeddingService()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("dense_disabled", error=str(exc))
+                self.embedder = None
+            self._embedder_ready = True
+        return self.embedder
+
+    def _scoped(self, session: Session, workspace_id: str, document_ids: list[str] | None):
+        q = select(DocumentChunk).where(DocumentChunk.workspace_id == _uuid(workspace_id))
+        if document_ids:
+            q = q.where(DocumentChunk.document_id.in_([_uuid(d) for d in document_ids]))
+        return q
+
+    @staticmethod
+    def _row(c: DocumentChunk) -> dict:
+        return {
+            "id": c.id,
+            "chunk_id": c.chunk_id,
+            "document_id": c.document_id,
+            "text": c.text,
+            "kind": c.kind,
+            "pages": c.pages or [],
+            "sheet": c.sheet,
+            "locator": c.locator,
+            "section_title": c.section_title,
+            "parent_section_id": c.parent_section_id,
+            "token_count": c.token_count,
+            "seq": c.seq,
+        }
 
     def lexical(self, session: Session, query: str, workspace_id: str, document_ids: list[str] | None, limit: int) -> list[dict]:
-        rows = self._rows(
-            session, _LEXICAL_SQL,
-            {"q": query, "ws": workspace_id, "docs": document_ids or None, "limit": limit},
-        )
-        return rows
+        """Term-overlap scoring over a LIKE-prefiltered candidate set."""
+        query_terms = _terms(query)
+        if not query_terms:
+            return []
+        like_ors = [DocumentChunk.text.ilike(f"%{t}%") for t in list(query_terms)[:6]]
+        rows = [
+            self._row(c)
+            for c in session.scalars(
+                self._scoped(session, workspace_id, document_ids).filter(or_(*like_ors))
+            )
+        ]
+        scored: list[dict] = []
+        for r in rows:
+            text_terms = _terms(r["text"])
+            overlap = query_terms & text_terms
+            if not overlap:
+                continue
+            r["rank"] = len(overlap) / math.sqrt(max(1, len(text_terms)))
+            scored.append(r)
+        scored.sort(key=lambda r: (-r["rank"], r["seq"]))
+        return scored[:limit]
 
     def exact_phrase(self, session: Session, phrase: str, workspace_id: str, document_ids: list[str] | None, limit: int) -> list[dict]:
-        return self._rows(
-            session, _EXACT_SQL,
-            {"phrase": f"%{phrase}%", "ws": workspace_id, "docs": document_ids or None, "limit": limit},
+        q = (
+            self._scoped(session, workspace_id, document_ids)
+            .filter(DocumentChunk.text.ilike(f"%{phrase}%"))
+            .order_by(DocumentChunk.seq)
+            .limit(limit)
         )
+        rows = [self._row(c) for c in session.scalars(q)]
+        for r in rows:
+            r["rank"] = 1.0
+        return rows
 
     def dense(self, session: Session, query: str, workspace_id: str, document_ids: list[str] | None, limit: int) -> list[dict]:
-        if self.embedder is None:
+        if self._get_embedder() is None:
             return []
-        qv = "[" + ",".join(f"{v:.6f}" for v in self.embedder.embed_query(query)) + "]"
-        return self._rows(
-            session, _DENSE_SQL,
-            {"qv": qv, "ws": workspace_id, "docs": document_ids or None, "limit": limit},
+        qv = np.asarray(self.embedder.embed_query(query), dtype="float32")
+        qnorm = float(np.linalg.norm(qv)) or 1e-9
+        stmt = (
+            select(DocumentChunk, DocumentEmbedding.embedding)
+            .join(DocumentEmbedding, DocumentEmbedding.chunk_db_id == DocumentChunk.id)
+            .where(DocumentChunk.workspace_id == _uuid(workspace_id))
         )
+        if document_ids:
+            stmt = stmt.where(DocumentChunk.document_id.in_([_uuid(d) for d in document_ids]))
+        scored: list[tuple[dict, float]] = []
+        for chunk, emb in session.execute(stmt).all():
+            if not emb:
+                continue
+            v = np.asarray(emb, dtype="float32")
+            if v.shape != qv.shape:
+                continue  # stale model dimension — skip rather than crash
+            denom = float(np.linalg.norm(v)) * qnorm
+            sim = float(np.dot(v, qv) / denom) if denom else 0.0
+            scored.append((self._row(chunk), sim))
+        scored.sort(key=lambda rs: -rs[1])
+        out = []
+        for r, sim in scored[:limit]:
+            r["rank"] = sim
+            out.append(r)
+        return out
 
     def _parent_and_neighbours(self, session: Session, rows: list[dict]) -> None:
         """Attach parent-section text and adjacent-chunk text for context expansion."""
         for row in rows:
             if row.get("parent_section_id"):
-                row["parent_text"] = session.scalar(
-                    text(
-                        "SELECT string_agg(text, '\n' ORDER BY created_at) FROM document_chunks "
-                        "WHERE document_id = :d AND parent_section_id = :s AND token_count < 2000"
-                    ),
-                    {"d": row["document_id"], "s": row["parent_section_id"]},
-                )
-            row["neighbours"] = [
-                r[0]
-                for r in session.execute(
-                    text(
-                        "SELECT text FROM document_chunks WHERE document_id = :d "
-                        "ORDER BY created_at OFFSET :o LIMIT 2"
-                    ),
-                    {"d": row["document_id"], "o": max(0, int(row["chunk_index"] or 0) - 1)},
-                ).fetchall()
-            ] if row.get("chunk_index") else []
+                texts = session.scalars(
+                    select(DocumentChunk.text)
+                    .where(
+                        DocumentChunk.document_id == row["document_id"],
+                        DocumentChunk.parent_section_id == row["parent_section_id"],
+                        DocumentChunk.token_count < 2000,
+                    )
+                    .order_by(DocumentChunk.seq)
+                ).all()
+                row["parent_text"] = "\n".join(t for t in texts if t)
+            if row.get("seq") is not None:
+                nb = session.scalars(
+                    select(DocumentChunk.text).where(
+                        DocumentChunk.document_id == row["document_id"],
+                        DocumentChunk.seq.in_([row["seq"] - 1, row["seq"] + 1]),
+                    )
+                ).all()
+                row["neighbours"] = [t for t in nb if t]
+            else:
+                row["neighbours"] = []
 
     def retrieve(
         self,
@@ -178,24 +244,32 @@ class HybridRetriever:
 
     def _document_titles(self, session: Session, workspace_id: str) -> dict[str, str]:
         rows = session.execute(
-            text("SELECT id::text, title FROM documents WHERE workspace_id = :ws"), {"ws": workspace_id}
-        ).fetchall()
-        return dict(rows)
+            select(Document.id, Document.title).where(Document.workspace_id == _uuid(workspace_id))
+        ).all()
+        return {str(i): t for i, t in rows}
 
     def _persist(self, session, run_id, query, lexical_rows, dense_rows, scored, reranked) -> None:
-        session.execute(
-            text(
-                "UPDATE retrieval_runs SET lexical_count = :lx, dense_count = :dn, reranked = :rr "
-                "WHERE id = CAST(:id AS uuid)"
-            ),
-            {"lx": len(lexical_rows), "dn": len(dense_rows), "rr": reranked, "id": run_id},
-        )
+        run = session.get(RetrievalRun, _uuid(run_id))
+        if run is None:
+            return
+        run.lexical_count = len(lexical_rows)
+        run.dense_count = len(dense_rows)
+        run.reranked = reranked
         for rank, (cid, score) in enumerate(scored):
-            session.execute(
-                text(
-                    "INSERT INTO retrieval_candidates (id, run_id, chunk_db_id, rank, source, score, selected) "
-                    "SELECT gen_random_uuid(), CAST(:rid AS uuid), id, :rank, 'rerank', :score, true "
-                    "FROM document_chunks WHERE chunk_id = :cid LIMIT 1"
-                ),
-                {"rid": run_id, "rank": rank, "score": score, "cid": cid},
+            chunk = session.scalar(
+                select(DocumentChunk)
+                .where(DocumentChunk.workspace_id == run.workspace_id, DocumentChunk.chunk_id == cid)
+                .limit(1)
+            )
+            if chunk is None:
+                continue
+            session.add(
+                RetrievalCandidate(
+                    run_id=run.id,
+                    chunk_db_id=chunk.id,
+                    rank=rank,
+                    source="rerank",
+                    score=float(score),
+                    selected=True,
+                )
             )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -53,7 +54,10 @@ class ChatService:
     ) -> AsyncIterator[dict]:
         """Yield SSE-ready dicts: {"type": "delta"|"done"|"error"}."""
         conv = self.get_or_create_conversation(session, workspace_id, profile_id, payload)
-        session.add(Message(id=uuid.uuid4(), conversation_id=conv.id, role="user", content=payload.query))
+        # Explicit microsecond timestamps: SQLite's CURRENT_TIMESTAMP is
+        # second-precision, which could flip user/assistant ordering.
+        session.add(Message(id=uuid.uuid4(), conversation_id=conv.id, role="user", content=payload.query,
+                            created_at=datetime.now(timezone.utc)))
 
         # 1. Deterministic query plan (task type + possible exact-phrase route)
         doc_ids = [str(d) for d in (payload.document_ids or [])]
@@ -121,6 +125,7 @@ class ChatService:
             id=uuid.uuid4(), conversation_id=conv.id, role="assistant", content=answer,
             task_type=plan.primary.value, retrieval_run_id=run.id,
             metadata_={"citations": citations, "context_blocks": len(blocks)},
+            created_at=datetime.now(timezone.utc),
         )
         session.add(msg)
         session.flush()

@@ -5,8 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models_core import pk
@@ -46,9 +45,9 @@ class DocumentVersion(Base):
     id: Mapped[uuid.UUID] = pk()
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
     version: Mapped[int] = mapped_column(Integer)
-    canonical: Mapped[dict] = mapped_column(JSONB)  # CanonicalDocument.to_dict()
-    quality: Mapped[dict] = mapped_column(JSONB, default=dict)
-    parser_versions: Mapped[dict] = mapped_column(JSONB, default=dict)
+    canonical: Mapped[dict] = mapped_column(JSON)  # CanonicalDocument.to_dict()
+    quality: Mapped[dict] = mapped_column(JSON, default=dict)
+    parser_versions: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -79,8 +78,8 @@ class DocumentElement(Base):
     page: Mapped[int | None] = mapped_column(Integer)
     sheet: Mapped[str | None] = mapped_column(String(200))
     locator: Mapped[str | None] = mapped_column(String(100))
-    bbox: Mapped[dict | None] = mapped_column(JSONB)  # {x0,y0,x1,y1}
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    bbox: Mapped[dict | None] = mapped_column(JSON)  # {x0,y0,x1,y1}
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
 
 class DocumentTable(Base):
@@ -92,17 +91,17 @@ class DocumentTable(Base):
     table_id: Mapped[str] = mapped_column(String(40))
     title: Mapped[str | None] = mapped_column(String(300))
     sheet: Mapped[str | None] = mapped_column(String(200))
-    pages: Mapped[list] = mapped_column(JSONB, default=list)
-    headers: Mapped[list] = mapped_column(JSONB, default=list)
+    pages: Mapped[list] = mapped_column(JSON, default=list)
+    headers: Mapped[list] = mapped_column(JSON, default=list)
     n_rows: Mapped[int] = mapped_column(Integer, default=0)
     n_cols: Mapped[int] = mapped_column(Integer, default=0)
-    footnotes: Mapped[list] = mapped_column(JSONB, default=list)
-    validation_flags: Mapped[list] = mapped_column(JSONB, default=list)
+    footnotes: Mapped[list] = mapped_column(JSON, default=list)
+    validation_flags: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class DocumentTableRow(Base):
     __tablename__ = "document_table_rows"
-    __table_args__ = (Index("ix_rows_table", "table_id"),)
+    __table_args__ = (Index("ix_rows_table", "table_db_id"),)
 
     id: Mapped[uuid.UUID] = pk()
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))

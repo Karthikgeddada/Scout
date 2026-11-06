@@ -8,11 +8,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import router
 from app.core.config import get_settings
 from app.core.observability import RequestContextMiddleware, configure_logging
+from app.db.session import init_db
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
     configure_logging(settings.environment)
+    init_db()  # create tables if missing (SQLite default; replaces Alembic)
 
     app = FastAPI(
         title="SCOUT API",

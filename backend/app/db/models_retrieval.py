@@ -1,12 +1,11 @@
-"""Retrieval domain: chunks, embeddings (pgvector), retrieval runs/candidates."""
+"""Retrieval domain: chunks, embeddings (JSON float lists), retrieval runs/candidates."""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.models_core import pk
@@ -25,19 +24,19 @@ class DocumentChunk(Base):
     document_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
     workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
     version: Mapped[int] = mapped_column(Integer, default=1)
+    seq: Mapped[int] = mapped_column(Integer, default=0)  # chunk order within document
     kind: Mapped[str] = mapped_column(String(20))  # text|code|table|table_rows
     text: Mapped[str] = mapped_column(Text)
     token_count: Mapped[int] = mapped_column(Integer)
     parent_section_id: Mapped[str | None] = mapped_column(String(40))
     section_title: Mapped[str | None] = mapped_column(Text)
-    pages: Mapped[list] = mapped_column(JSONB, default=list)
+    pages: Mapped[list] = mapped_column(JSON, default=list)
     sheet: Mapped[str | None] = mapped_column(String(200))
     locator: Mapped[str | None] = mapped_column(String(100))
     table_id: Mapped[str | None] = mapped_column(String(40))
     content_hash: Mapped[str] = mapped_column(String(64), index=True)
-    metadata_: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    # tsv (tsvector) column is created only via SQL migration for FTS.
 
 
 class DocumentEmbedding(Base):
@@ -51,7 +50,7 @@ class DocumentEmbedding(Base):
     model_id: Mapped[str] = mapped_column(String(120))
     model_version: Mapped[str | None] = mapped_column(String(80))
     dim: Mapped[int] = mapped_column(Integer)
-    # actual vector column (pgvector) is created via SQL migration
+    embedding: Mapped[list] = mapped_column(JSON, default=list)  # vector values
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

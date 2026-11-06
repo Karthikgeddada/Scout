@@ -54,11 +54,6 @@ async def get_current_user(request: Request, session: Session = Depends(get_sess
         )
         session.add(profile)
         session.flush()
-    # RLS session context for this request's connection
-    session.execute(
-        __import__("sqlalchemy").text("SELECT set_config('app.supabase_user_id', :sub, false)"),
-        {"sub": sub},
-    )
     return CurrentUser(profile=profile, supabase_claims=claims)
 
 
@@ -85,11 +80,4 @@ def require_workspace(
     )
     if member is None:
         raise AuthorizationError("not a member of this workspace")
-    session.execute(
-        __import__("sqlalchemy").text(
-            "SELECT set_config('app.workspace_id', :ws, false), "
-            "set_config('app.profile_id', :pid, false)"
-        ),
-        {"ws": str(ws_id), "pid": str(user.profile.id)},
-    )
     return ws

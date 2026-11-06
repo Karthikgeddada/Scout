@@ -1,14 +1,14 @@
 """Document service: upload flow, listing, deletion, status, reprocessing.
 
 Upload flow: signed URL -> client PUT -> complete-upload (object verified) ->
-document row -> processing job + outbox event -> RabbitMQ (worker-driven ingestion).
+document row + processing job -> in-process background ingestion task.
 """
 
 from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,7 +16,7 @@ from app.core.errors import ConflictError, NotFoundError, RequestValidationError
 from app.db.models_chat import Conversation
 from app.db.models_core import AuditLog
 from app.db.models_documents import Document, DocumentVersion
-from app.db.models_jobs import OutboxEvent, ProcessingJob
+from app.db.models_jobs import ProcessingJob
 from app.services.storage import SupabaseStorage
 
 
@@ -59,7 +59,7 @@ class DocumentService:
             "expires_in": 900,
         }
 
-    def complete_upload(self, session: Session, document_id: uuid.UUID, profile_id: uuid.UUID) -> Document:
+    def complete_upload(self, session: Session, document_id: uuid.UUID, profile_id: uuid.UUID) -> tuple[Document, str]:
         doc = session.get(Document, document_id)
         if doc is None:
             raise NotFoundError("document not found")
@@ -70,6 +70,7 @@ class DocumentService:
             raise NotFoundError("uploaded object not found in storage")
         doc.status = "queued"
         job = ProcessingJob(
+            id=uuid.uuid4(),
             workspace_id=doc.workspace_id,
             document_id=doc.id,
             job_type="ingest",
@@ -77,18 +78,10 @@ class DocumentService:
             idempotency_key=f"ingest:{doc.id}:v{doc.version}",
         )
         session.add(job)
-        session.add(
-            OutboxEvent(topic="ingest.document", payload={
-                "job_id": None,  # filled at flush below
-                "document_id": str(doc.id),
-                "workspace_id": str(doc.workspace_id),
-                "version": doc.version,
-            })
-        )
         session.flush()
         session.add(AuditLog(workspace_id=doc.workspace_id, actor_profile_id=profile_id,
                              action="document.upload_complete", target_type="document", target_id=str(doc.id)))
-        return doc
+        return doc, str(job.id)
 
     # ---- queries ----
 
@@ -148,12 +141,12 @@ class DocumentService:
     def delete(self, session: Session, document_id: uuid.UUID, profile_id: uuid.UUID) -> None:
         doc = self.get_document(session, document_id)
         self.storage.delete(doc.storage_path)
-        session.execute(text("DELETE FROM documents WHERE id = :id"), {"id": str(document_id)})
+        session.delete(doc)  # child rows cascade (FK ondelete + SQLite pragma)
         session.add(AuditLog(workspace_id=doc.workspace_id, actor_profile_id=profile_id,
                              action="document.delete", target_type="document", target_id=str(document_id),
                              details={"title": doc.title}))
 
-    def reprocess(self, session: Session, document_id: uuid.UUID) -> Document:
+    def reprocess(self, session: Session, document_id: uuid.UUID) -> tuple[Document, str]:
         doc = self.get_document(session, document_id)
         doc.version += 1
         doc.status = "queued"
@@ -162,11 +155,8 @@ class DocumentService:
             status="queued", idempotency_key=f"ingest:{doc.id}:v{doc.version}",
         )
         session.add(job)
-        session.add(OutboxEvent(topic="ingest.document", payload={
-            "document_id": str(doc.id), "workspace_id": str(doc.workspace_id), "version": doc.version,
-        }))
         session.flush()
-        return doc
+        return doc, str(job.id)
 
     # ---- home/recents ----
 

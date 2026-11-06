@@ -93,9 +93,9 @@ export default function App() {
 
   return (
     <div className="flex h-full">
-      <aside className="flex w-56 shrink-0 flex-col border-r border-slate-200 bg-white">
+      <aside className="flex w-56 shrink-0 flex-col border-r border-black/5 bg-white/70 backdrop-blur-xl">
         <div className="px-4 py-4">
-          <span className="text-lg font-bold tracking-wide text-brand-600">SCOUT</span>
+          <span className="text-lg font-semibold tracking-tight text-brand-500">SCOUT</span>
         </div>
         <nav className="flex flex-1 flex-col gap-1 px-2">
           {NAV.map((item) => (
@@ -104,8 +104,8 @@ export default function App() {
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `rounded-md px-3 py-2 text-sm font-medium ${
-                  isActive ? "bg-brand-50 text-brand-700" : "text-slate-700 hover:bg-slate-100"
+                `rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive ? "bg-brand-500/10 text-brand-600" : "text-slate-600 hover:bg-black/5"
                 }`
               }
             >
@@ -113,7 +113,7 @@ export default function App() {
             </NavLink>
           ))}
         </nav>
-        <div className="border-t border-slate-200 p-3">
+        <div className="border-t border-black/5 p-3">
           <select
             className="input mb-2"
             value={current}

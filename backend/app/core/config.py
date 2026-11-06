@@ -30,27 +30,25 @@ class Settings(BaseSettings):
     supabase_jwt_audience: str = "authenticated"
     storage_bucket: str = "documents"
 
-    # Database
-    database_url: str = "postgresql+psycopg://scout:scout@localhost:5432/scout"
-
-    # Broker
-    rabbitmq_url: str = "amqp://scout:scout@localhost:5672/%2Fscout"
+    # Database — SQLite by default (zero-config; file lives next to the app).
+    # Any SQLAlchemy URL works, e.g. a Postgres URL if you want one.
+    database_url: str = "sqlite:///./scout.db"
 
     # Gemini (server-side only)
     gemini_api_key: str = ""
     gemini_model: str = ""
     gemini_max_output_tokens: int = 8192
 
-    # Local embedding model
-    embedding_model_id: str = ""
-    embedding_dim: int = 1024
-    embedding_device: str = "auto"  # auto | cpu | cuda
-    embedding_batch_size: int = 32
+    # Embeddings via the free Gemini API tier (no local models, no torch).
+    embedding_model_id: str = "text-embedding-004"
+    embedding_dim: int = 768
+    embedding_batch_size: int = 64
 
-    # Local reranker
+    # Local reranker is disabled by default in the light edition; retrieval
+    # falls back to the fused (RRF) ordering, which is already strong.
     reranker_model_id: str = ""
-    reranker_device: str = "auto"
-    reranker_enabled: bool = True
+    reranker_device: str = "cpu"
+    reranker_enabled: bool = False
 
     # Retrieval
     rrf_k: int = 60

@@ -1,24 +1,23 @@
-# Render Blueprint for SCOUT — single all-in-one backend service.
-# Deploys backend/ as one Docker web service that runs PostgreSQL (+pgvector),
-# RabbitMQ (both in-container), Alembic migrations, Celery worker + embedded
-# beat, and the FastAPI API. No external database required.
-# Frontend deploys separately on Vercel.
+# Render Blueprint for SCOUT — single native Python web service (no Docker).
+# SQLite (zero-config, file on the service disk) + the free Gemini API tier;
+# ingestion runs in-process via FastAPI BackgroundTasks. No Postgres,
+# RabbitMQ, Celery, or separate worker. Frontend deploys separately on Vercel.
+# NOTE: free plan disk is ephemeral — SQLite data resets on each deploy.
 services:
   - type: web
     name: scout-api
-    runtime: docker
-    dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    runtime: python
     plan: free
+    rootDir: ./backend
+    buildCommand: pip install -e ".[ingestion]"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     autoDeploy: true
     envVars:
-      # Pin PORT so uvicorn, the Docker HEALTHCHECK (localhost:8000) and
-      # Render all agree on one port.
-      - key: PORT
-        value: "8000"
-      # No SCOUT_DATABASE_URL needed — the in-container Postgres is used by
-      # default. Set it only if you point at an external Postgres instead.
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      # No SCOUT_DATABASE_URL needed — SQLite is used by default.
+      # Set it only if you point at an external database instead.
       - key: SCOUT_SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SCOUT_SUPABASE_JWKS_URL

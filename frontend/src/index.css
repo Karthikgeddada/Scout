@@ -6,27 +6,37 @@
   html,
   body,
   #root {
-    @apply h-full bg-slate-50 text-slate-900 antialiased;
+    @apply h-full bg-canvas text-slate-900 antialiased;
+  }
+  body {
+    font-family:
+      -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+      "Helvetica Neue", "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
 @layer components {
   .btn {
-    @apply rounded-md px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50;
+    @apply rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 disabled:opacity-50;
   }
   .btn-primary {
-    @apply btn bg-brand-600 text-white hover:bg-brand-700;
+    @apply btn bg-brand-500 text-white shadow-soft hover:bg-brand-600 active:scale-[0.98];
   }
   .btn-ghost {
-    @apply btn text-slate-700 hover:bg-slate-200;
+    @apply btn text-slate-700 hover:bg-black/5;
   }
   .card {
-    @apply rounded-lg border border-slate-200 bg-white p-4 shadow-sm;
+    @apply rounded-2xl bg-white p-5 shadow-soft;
   }
   .input {
-    @apply w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:outline-none;
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm transition-shadow
+      focus:border-brand-400 focus:outline-none focus:ring-4 focus:ring-brand-500/15;
   }
   .chip {
-    @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
+    @apply inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700;
+  }
+  .glass {
+    @apply border-b border-black/5 bg-white/70 backdrop-blur-xl;
   }
 }
