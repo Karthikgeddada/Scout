@@ -1,13 +1,14 @@
 /** Home: quick question box, recent documents and conversations, digest stats. */
 
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api, type Conversation, type Document } from "../lib/api";
 
 export default function Home({ workspaceId }: { workspaceId: string }) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [quickQuestion, setQuickQuestion] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -38,7 +39,7 @@ export default function Home({ workspaceId }: { workspaceId: string }) {
           onSubmit={(e) => {
             e.preventDefault();
             if (!quickQuestion.trim()) return;
-            window.location.hash = `#/chat?q=${encodeURIComponent(quickQuestion)}`;
+            navigate(`/chat?q=${encodeURIComponent(quickQuestion)}`);
           }}
         >
           <input

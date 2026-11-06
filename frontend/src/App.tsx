@@ -25,6 +25,7 @@ export default function App() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [current, setCurrent] = useState<string>(localStorage.getItem("scout_ws") ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [tokenInput, setTokenInput] = useState("");
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -76,16 +77,30 @@ export default function App() {
           <input
             className="input mb-3"
             placeholder="Paste Supabase access token (dev mode)"
-            onKeyDown={async (e) => {
-              if (e.key === "Enter") {
-                setToken((e.target as HTMLInputElement).value);
+            value={tokenInput}
+            onChange={(e) => setTokenInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && tokenInput.trim()) {
+                setToken(tokenInput.trim());
                 window.location.reload();
               }
             }}
           />
-          <button className="btn-primary w-full" onClick={() => window.location.reload()}>
-            Retry
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="btn-primary flex-1"
+              disabled={!tokenInput.trim()}
+              onClick={() => {
+                setToken(tokenInput.trim());
+                window.location.reload();
+              }}
+            >
+              Sign in
+            </button>
+            <button className="btn-ghost" onClick={() => window.location.reload()}>
+              Retry
+            </button>
+          </div>
         </div>
       </div>
     );

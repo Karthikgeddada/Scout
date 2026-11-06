@@ -1,6 +1,7 @@
 /** Chat: conversations sidebar, SSE streaming answers, per-message citation list. */
 
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, streamChat, type Citation, type Conversation, type Document } from "../lib/api";
 
 interface ChatMessage {
@@ -22,6 +23,17 @@ export default function Chat({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottom = useRef<HTMLDivElement>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // Prefill the composer when arriving from Home's quick-question box (/?q=...).
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q) {
+      setInput(q);
+      setSearchParams({}, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!workspaceId) return;
