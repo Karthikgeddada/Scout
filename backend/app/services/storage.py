@@ -66,20 +66,53 @@ class SupabaseStorage:
         return resp.content
 
     def stat(self, storage_path: str) -> dict | None:
-        """Verify an uploaded object exists and get its size."""
+        """Verify an uploaded object exists and get its size.
+
+        Tries POST /object/info with both known request shapes, then falls
+        back to a ranged GET — which definitively proves existence without
+        downloading the whole object.
+        """
+        import structlog
+
+        log = structlog.get_logger("storage.stat")
         bucket = self._settings.storage_bucket
+        path = f"{bucket}/{storage_path}"
         with httpx.Client(timeout=30) as client:
-            resp = client.post(
-                self._url("/object/info"),
-                headers=self._headers(),
-                json=[f"{bucket}/{storage_path}"],
+            for payload in ([path], {"paths": [path]}):
+                resp = client.post(self._url("/object/info"), headers=self._headers(), json=payload)
+                if resp.status_code >= 400:
+                    continue
+                data = resp.json()
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    info = item.get("data") if isinstance(item.get("data"), dict) else item
+                    if item.get("error") or info is None:
+                        continue
+                    size = info.get("size")
+                    if size is not None:
+                        return {
+                            "size": size,
+                            "mime": info.get("mimetype") or info.get("contentType") or info.get("mime"),
+                        }
+            # Fallback: fetch only the first byte; 2xx proves the object exists.
+            resp = client.get(
+                self._url(f"/object/{path}"),
+                headers={**self._headers(), "Range": "bytes=0-0"},
             )
-        if resp.status_code >= 400:
-            return None
-        data = resp.json()
-        if isinstance(data, list) and data:
-            first = data[0]
-            return {"size": first.get("size"), "mime": first.get("mimetype")}
+            log.info("stat_fallback", path=path, status=resp.status_code)
+            if resp.status_code < 400:
+                crange = resp.headers.get("content-range")
+                clen = resp.headers.get("content-length")
+                if crange and "/" in crange:
+                    size = int(crange.rsplit("/", 1)[-1])
+                elif clen and clen.isdigit():
+                    size = int(clen)
+                else:
+                    size = None
+                return {"size": size, "mime": resp.headers.get("content-type")}
+            log.warning("stat_failed", path=path, status=resp.status_code, body=resp.text[:300])
         return None
 
     def delete(self, storage_path: str) -> None:
