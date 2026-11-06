@@ -1,4 +1,4 @@
-"""Embedding service via the free Gemini API tier (text-embedding-004).
+"""Embedding service via the free Gemini API tier (gemini-embedding-001).
 
 No local models and no torch: text batches are embedded through the Gemini
 API, dimensions are validated against configuration, transient failures are
@@ -19,7 +19,7 @@ class EmbeddingService:
         s = get_settings()
         if not s.gemini_api_key:
             raise UpstreamError("SCOUT_GEMINI_API_KEY not configured")
-        self.model_id = s.embedding_model_id or "text-embedding-004"
+        self.model_id = s.embedding_model_id or "gemini-embedding-001"
         self.dim = s.embedding_dim
         self.batch_size = s.embedding_batch_size
         self._version: str | None = self.model_id
@@ -45,8 +45,14 @@ class EmbeddingService:
             batch = texts[start : start + self.batch_size]
             for attempt in range(3):
                 try:
+                    from google.genai import types
+
                     response = self._get_client().models.embed_content(
-                        model=self.model_id, contents=batch
+                        model=self.model_id,
+                        contents=batch,
+                        config=types.EmbedContentConfig(output_dimensionality=self.dim)
+                        if self.dim
+                        else None,
                     )
                     embeddings = getattr(response, "embeddings", None) or []
                     if len(embeddings) != len(batch):

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     gemini_max_output_tokens: int = 8192
 
     # Embeddings via the free Gemini API tier (no local models, no torch).
-    embedding_model_id: str = "text-embedding-004"
+    embedding_model_id: str = "gemini-embedding-001"
     embedding_dim: int = 768
     embedding_batch_size: int = 64
 
