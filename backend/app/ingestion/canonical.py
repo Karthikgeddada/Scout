@@ -111,6 +111,19 @@ class QualityReport:
         denom = self.pages_total or 1
         return round((self.pages_with_native_text + self.pages_ocr) / denom, 4)
 
+    def to_dict(self) -> dict[str, Any]:
+        """Plain-dict form (dataclass fields only — text_coverage stays a
+        derived property so from_dict(**to_dict()) round-trips cleanly)."""
+        return {
+            "pages_total": self.pages_total,
+            "pages_with_native_text": self.pages_with_native_text,
+            "pages_ocr": self.pages_ocr,
+            "pages_empty": self.pages_empty,
+            "tables_detected": self.tables_detected,
+            "validation_flags": self.validation_flags,
+            "parser_versions": self.parser_versions,
+        }
+
 
 @dataclass
 class CanonicalDocument:
