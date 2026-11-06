@@ -33,7 +33,13 @@ class SupabaseStorage:
             )
         if resp.status_code >= 400:
             raise StorageError(f"upload URL failed: {resp.text}")
-        return resp.json()  # {"url": ..., "token": ...}
+        data = resp.json()  # {"url": ..., "token": ...}
+        # Supabase returns a RELATIVE signed-upload path ("/object/upload/sign/...");
+        # clients PUT directly to it, so it must be an absolute URL.
+        rel = (data.get("url") or "").lstrip("/")
+        if rel:
+            data["url"] = f"{self._settings.supabase_url}/storage/v1/{rel}"
+        return data
 
     def create_signed_download_url(self, storage_path: str, expires_seconds: int = 600) -> str:
         bucket = self._settings.storage_bucket
