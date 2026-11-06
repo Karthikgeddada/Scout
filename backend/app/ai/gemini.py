@@ -37,9 +37,12 @@ class GeminiClient:
         return self._client
 
     async def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Single-shot generation with bounded retries."""
-        from google.genai import errors as genai_errors
+        """Single-shot generation with bounded retries.
 
+        NOTE: the google-genai SDK defines APIError/ClientError/ServerError —
+        there is no GenAIError; catching a broad Exception is required or any
+        SDK error escapes uncaught and surfaces as a 500.
+        """
         last_error: Exception | None = None
         for attempt in range(3):
             try:
@@ -52,16 +55,18 @@ class GeminiClient:
                         "temperature": 0.2,
                     },
                 )
-                return response.text or ""
-            except genai_errors.GenAIError as exc:
+                try:
+                    text = response.text  # raises when response is blocked/empty
+                except Exception:  # noqa: BLE001
+                    text = ""
+                return text or ""
+            except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 log.warning("gemini_retry", attempt=attempt + 1, error=str(exc))
         raise UpstreamError(f"Gemini generation failed: {last_error}")
 
     async def stream(self, system_prompt: str, user_prompt: str) -> AsyncIterator[str]:
         """Streaming generation for chat SSE."""
-        from google.genai import errors as genai_errors
-
         try:
             stream = self._get_client().models.generate_content_stream(
                 model=self.model,
@@ -73,9 +78,13 @@ class GeminiClient:
                 },
             )
             for chunk in stream:
-                if chunk.text:
-                    yield chunk.text
-        except genai_errors.GenAIError as exc:
+                try:
+                    text = chunk.text  # raises on empty/blocked parts
+                except Exception:  # noqa: BLE001
+                    continue
+                if text:
+                    yield text
+        except Exception as exc:  # noqa: BLE001
             raise UpstreamError(f"Gemini streaming failed: {exc}") from exc
 
 
