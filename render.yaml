@@ -18,6 +18,8 @@ services:
         value: "3.12.7"
       # No SCOUT_DATABASE_URL needed — SQLite is used by default.
       # Set it only if you point at an external database instead.
+      - key: SCOUT_SUPABASE_URL
+        value: "https://ftdmbprinolyglvfbevl.supabase.co"
       - key: SCOUT_SUPABASE_SERVICE_ROLE_KEY
         sync: false
       - key: SCOUT_SUPABASE_JWKS_URL
