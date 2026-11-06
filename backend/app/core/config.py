@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Gemini (server-side only)
     gemini_api_key: str = ""
-    gemini_model: str = ""
+    gemini_model: str = "gemini-2.0-flash"
     gemini_max_output_tokens: int = 8192
 
     # Embeddings via the free Gemini API tier (no local models, no torch).
